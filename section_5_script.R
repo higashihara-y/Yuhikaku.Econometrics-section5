@@ -1,38 +1,104 @@
 pacman::p_load(tidyverse, readr, readxl)
 library(estimatr)
+library(modelsummary)
 
-# 5-14
+# データの取得
 data514 <- read_csv("youdou.csv")
 glimpse(data514)
 
-# 経済成長率を算出
+# 経済成長率及び対数GDPを作成
 data514 <- data514 |> 
   mutate(
-    ecodev = 100 * (log(data514$y99) - log(data514$y80)) / 19)
+    ecodev = 100 * (log(data514$y99) - log(data514$y80)) / 19,
+    lny80 = log(y80),
+    lny90 = log(y90),
+    lny99 = log(y99)
+    )
+
+# 表5-5
+# datasummary内の変数は全てmodelsummaryの関数（N,Mean,SDなど）
+vars <- data514 |> 
+  select(ecodev, trust80, norm80, education80, lny80)
+ 
+table5.5 <- modelsummary::datasummary(
+  All(vars) ~ N + Mean + SD + Min + Max,
+  data = data514,
+  output = "data.frame",
+  fmt = 3)
+
+table5.5[, 1] <- c("経済成長率", "信頼", "規範", "教育水準",
+                        "初期時点対数GDP")
+
+colnames(table5.5) <- c("変数", "サンプルサイズ", "平均",
+                        "標準誤差", "最小値", "最大値")
+
+gt::gt(table5.5)
 
 
+
+# 実証5-14
 # 5-14-a
 #各モデルのOLS推定（不均一分散に頑強な標準誤差を使用）
 model1 <- lm_robust(ecodev ~ trust80, data = data514)
-summary(model1)
-
 model2 <- lm_robust(ecodev ~ norm80, data = data514)
-summary(model2)
-
 model3 <- lm_robust(ecodev ~ trust80 + norm80, data = data514)
-summary(model3)
-
 model4 <- lm_robust(ecodev ~ trust80 + log(y80) + education80,
                     data = data514)
-summary(model4)
-
 model5 <- lm_robust(ecodev ~ norm80 + log(y80) + education80,
                     data = data514)
-summary(model5)
-
 model6 <- lm_robust(ecodev ~ trust80 + norm80 + log(y80) + education80,
                     data = data514)
-summary(model6)
+
+models5_14 <- list(
+  "(1)" = model1,
+  "(2)" = model2,
+  "(3)" = model3,
+  "(4)" = model4,
+  "(5)" = model5,
+  "(6)" = model6
+)
+
+attr(models5_14$`(3)`, "FTEST") <- TRUE
+attr(models5_14$`(6)`, "FTEST") <- TRUE
+
+glance_custom.lm_robust <- function(x) {
+  if(!isTRUE(attr(x, "FTEST"))) return(NULL)
+  
+  ftest <- car::linearHypothesis(x, test = "F", c("trust80", "norm80"))
+  
+  out <- tibble(
+    F_value = ftest[["F"]][2],
+    F_p = sprintf("(%.3f)", ftest[["Pr(>F)"]][2])
+  )
+  return(out)
+}
+
+cm <- c("trust80" = "信頼",
+        "norm80" = "規範",
+        "lny80" = "初期時点対数GDP",
+        "education80" = "教育水準",
+        "(Intercept)" = "定数項")
+
+gm <- tribble(
+  ~raw, ~clean, ~fmt,
+  "F_value", "F検定量の値 $H_0:\\beta_{信頼}=0, \\beta_{規範}=0$", 3,
+  "F_p", "   ", 3,
+  "adj.r.squared", "$\\bar{R}^2$", 3,
+  "nobs", "サンプルサイズ", 0
+)
+
+modelsummary::msummary(
+  models5_14,
+  coef_map = cm,
+  gof_omit = "R2$|RMSE|AIC|BIC|Log.Lik.",
+  gof_map = gm,
+  output = "kableExtra",
+  estimate = "{estimate}{stars}",
+  notes = "* p &lt; 0.05, ** p &lt; 0.01, *** p &lt; 0.001,"
+) |> 
+  row_spec(c(0, 10, 12), extra_css = "border-bottom: 1.5px solid")
+
+
 
 
 # 5-14-c
